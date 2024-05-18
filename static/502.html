@@ -1,0 +1,135 @@
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Instability detected</title>
+        <style>
+            @media (prefers-color-scheme: light) {
+                body {
+                    background-color: white;
+                    color: black;
+                }
+            }
+            @media (prefers-color-scheme: dark) {
+                body {
+                    background-color: #333;
+                    color: #999;
+                }
+            }
+            body {
+                font-family: Arial, Verdana, Tahoma;
+            }
+        </style>
+        <script>
+            function onload() {
+                fetch('/static/timeout.json?cb=' + new Date().getTime())
+                    .then((resp) => resp.json())
+                    .then((j) => {
+                        if (j.started && j.eta) {
+                            document.getElementById('period').innerHTML =
+                                new Date(j.started * 1000).toLocaleTimeString() +
+                                ' — ' +
+                                new Date(j.eta * 1000).toLocaleTimeString();
+                        } else {
+                            document.getElementById('expected').style.display = 'none';
+                        }
+                        update(j.eta * 1000, j.started * 1000);
+                        if (j.reason) {
+                            document.getElementById('reason').innerHTML =
+                                'Reason: ' + j.reason;
+                        }
+                        if (location.pathname !== '/static/502.html') {
+                            check();
+                        }
+                    })
+                    .catch((err) => console.log(err));
+            }
+
+            function check() {
+                fetch(window.location.href)
+                    .then((resp) => {
+                        if (resp.status < 400) {
+                            const cb = document.getElementById('notify');
+                            if (cb.checked) {
+                                const a = document.getElementById('alert');
+                                a.src = `/static/alert_${
+                                    Math.floor(Math.random() * 3) + 1
+                                }.aac`;
+                                a.addEventListener('ended', () =>
+                                    window.location.reload()
+                                );
+                                a.play();
+                            } else {
+                                window.location.reload();
+                            }
+                        } else {
+                            setTimeout(check, 5000);
+                        }
+                    })
+                    .catch(() => setTimeout(check, 5000));
+            }
+
+            function update(eta, started) {
+                const timer_e = document.getElementById('timer');
+                const perc_e = document.getElementById('perc');
+                const now = new Date().getTime();
+                if (now < eta) {
+                    const left = (eta - now) / 1000;
+                    const hours = Math.floor(left / 3600)
+                        .toFixed(0)
+                        .padStart(2, '0');
+                    const mins = Math.floor((left % 3600) / 60)
+                        .toFixed(0)
+                        .padStart(2, '0');
+                    const secs = Math.floor(left % 60)
+                        .toFixed(0)
+                        .padStart(2, '0');
+                    timer_e.innerHTML = hours + ':' + mins + ':' + secs;
+                    const perc = ((now - started) * 100 / (eta - started)).toFixed(1);
+                    perc_e.innerHTML = `[${perc}%]`;
+                    setTimeout(() => update(eta, started), 1000);
+                } else {
+                    timer_e.innerHTML = 'soon';
+                    perc_e.innerHTML = '[100%]';
+                }
+            }
+        </script>
+    </head>
+    <body onload="onload()">
+        <div
+            style="
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100%;
+            "
+        >
+            <h1>Stable diffusion backend is offline</h1>
+            <h2 id='expected'>
+                Expected downtime: <span id="period"></span>
+                <span id="perc"></span>
+            </h2>
+            <h2>Back online in: <span id="timer" /></h2>
+            <h3 id="reason"></h3>
+            <h4>
+                You can leave this tab open, as soon as the instance is back
+                online it will refresh automatically.
+            </h4>
+            <h4>
+                <input type="checkbox" id="notify" /><label for="notify"
+                    >Enable audio notification</label
+                >
+            </h4>
+            <h5>
+                Yes, even before the timer elapses, it's mostly for
+                informational purposes and doesn't guarantee anything.
+            </h5>
+            <h6>
+                Contact me if your prompt fever is strong. It is always morally
+                correct.
+            </h6>
+            <audio id="alert" />
+        </div>
+    </body>
+</html>

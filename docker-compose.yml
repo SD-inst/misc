@@ -1,0 +1,205 @@
+services:
+
+  caddy:
+    hostname: caddy
+    networks:
+      - internet
+      - nointernet
+    image: caddy:latest
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./static:/srv
+      - ./ssl:/etc/caddy/ssl
+    ports:
+      - "7860:7860" # main ssl port
+      - "7861:7861" # main no ssl port
+      - "7760:7760" # noauth port
+      - "7761:7761" # text-ui
+
+  stablediff-cuda:
+    networks: 
+      - nointernet
+    build: 
+      context: .
+      dockerfile: Dockerfile.cuda
+    image: homenas.local:5000/sd:latest
+    user: 10000:10000
+    container_name: stablediff-runner-cuda
+    runtime: nvidia
+    environment:
+      TZ: "Asia/Jakarta"
+      NVIDIA_VISIBLE_DEVICES: all
+      COMMANDLINE_ARGS: "--listen"
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "nvidia-smi; . /stablediff.env; echo launch.py $$COMMANDLINE_ARGS;
+      if [ ! -d /stablediff-web/.git ]; then
+        cp -a /sdtemp/. /stablediff-web/
+      fi;
+      if [ ! -f /stablediff-web/models/Stable-diffusion/*.ckpt ]; then
+        echo 'Please copy stable diffusion model to stablediff-models directory'
+        echo 'You may need sudo to perform this action'
+        exit 1
+      fi;
+      rm -rf /tmp/* /stablediff-web/log/images;
+      python launch.py
+      "
+    volumes:
+      - ./stablediff.env:/stablediff.env
+      - ./stablediff-web:/stablediff-web
+      - ./stablediff-models:/stablediff-web/models/Stable-diffusion
+      - ./cache/user-cache:/home/sd/.cache
+      - type: tmpfs
+        target: /stablediff-web/log
+      - type: tmpfs
+        target: /stablediff-web/outputs
+      - type: tmpfs
+        target: /tmp
+
+  text-generation-webui:
+    build:
+      context: ../text-generation-webui
+      dockerfile: ../text-generation-webui/Dockerfile
+      args:
+        # specify which cuda version your card supports: https://developer.nvidia.com/cuda-gpus
+        TORCH_CUDA_ARCH_LIST: ${TORCH_CUDA_ARCH_LIST:-7.5}
+        WEBUI_VERSION: ${WEBUI_VERSION:-HEAD}
+        APP_UID: 1000
+        APP_GID: 1000
+        BUILD_EXTENSIONS: openai
+    image: homenas.local:5000/text:latest
+    user: 1000:1000
+    runtime: nvidia
+    env_file: ../text-generation-webui/.env
+    stdin_open: true
+    tty: true
+    volumes:
+      - ../text-generation-webui/cache:/home/app/text-generation-webui/cache
+      - ../text-generation-webui/characters:/home/app/text-generation-webui/characters
+      - ../text-generation-webui/extensions:/home/app/text-generation-webui/extensions
+      - ../text-generation-webui/loras:/home/app/text-generation-webui/loras
+      - ../text-generation-webui/logs:/home/app/text-generation-webui/logs
+      - ../text-generation-webui/models:/home/app/text-generation-webui/models
+      - ../text-generation-webui/presets:/home/app/text-generation-webui/presets
+      - ../text-generation-webui/prompts:/home/app/text-generation-webui/prompts
+      - ../text-generation-webui/softprompts:/home/app/text-generation-webui/softprompts
+      - ../text-generation-webui/training:/home/app/text-generation-webui/training
+      - ../text-generation-webui/instruction-templates:/home/app/text-generation-webui/instruction-templates
+      - ../text-generation-webui/training:/home/app/text-generation-webui/training
+      - ../text-generation-webui/cloudflared:/etc/cloudflared
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks: 
+      - nointernet
+
+  tts:
+    build:
+      context: ../tts
+      dockerfile: ../tts/Dockerfile
+      args:
+        APP_UID: 1000
+        APP_GID: 1000
+    image: homenas.local:5000/tts
+    runtime: nvidia
+    user: 1000:1000
+    volumes:
+      - /home/rkfg/.local/share/tts:/home/app/.local/share/tts
+      - ../tts/assets/weights:/home/app/tts/assets/weights
+      - type: tmpfs
+        target: /tmp
+    restart: unless-stopped
+    networks: 
+      - nointernet
+
+  authproxy:
+    networks:
+      - nointernet
+      - internet
+    build:
+      context: .
+      dockerfile: Dockerfile.auth
+    image: homenas.local:5000/authproxy
+    runtime: nvidia
+    user: 10000:10000
+    volumes:
+      - ./users.txt:/app/users.txt
+      - ./cookie.txt:/app/cookie.txt
+      - ./stablediff-web/cache.json:/app/cache.json
+      - ./stablediff-web/models/Lora/uploads:/uploads
+      - /var/run/sdwd/control.fifo:/var/run/sdwd/control.fifo
+
+  tor:
+    image: goldy/tor-hidden-service:latest
+    networks:
+      - internet
+      - nointernet
+    links:
+      - caddy
+    environment:
+        # Set mapping ports
+        SD_TOR_SERVICE_HOSTS: '80:caddy:7861'
+    secrets:
+      - sd
+    volumes:
+      - tor-keys:/var/lib/tor/hidden_service/
+
+  grafana:
+    user: 10000:10000
+    image: grafana/grafana
+    networks:
+      - nointernet
+    volumes:
+      - ./grafana-data:/var/lib/grafana
+    environment:
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_NAME=Goon house Inc.
+  
+  prometheus:
+    user: 10000:10000
+    image: prom/prometheus
+    networks:
+      - nointernet
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus.d:/etc/prometheus/prometheus.d
+      - ./prometheus-data:/prometheus
+    command:
+      - '--storage.tsdb.retention.time=180d'
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+
+  speedtest:
+    user: 10000:10000
+    build: speedtest-go
+    image: homenas.local:5000/speedtest
+    volumes:
+      - ./settings.toml:/app/settings.toml
+    networks:
+      - internet
+    
+secrets:
+  sd:
+    file: ./tor_pkey
+
+volumes:
+  tor-keys:
+    driver: local
+
+networks:
+  internet: {}
+  nointernet:
+    internal: true

@@ -1,0 +1,15 @@
+FROM nvidia/cuda:11.8.0-base-ubuntu22.04
+COPY authproxy /app/authproxy
+WORKDIR /app
+ENTRYPOINT ["/app/authproxy"]
+CMD ["-f", "users.txt",\
+    "-t", "http://stablediff-cuda:7860",\
+    "-l", "0.0.0.0:7860",\
+    "--llm-url", "http://text-generation-webui:5000",\
+    "--tts-url", "http://tts:8000",\
+    "--llm-model", "QMB15_Mythomax-L2-13B-8bit-exl2",\
+    "--llm-args", "{\"max_seq_len\": 8192, \"alpha_value\": 2.5, \"cache_4bit\": true, \"cfg_cache\": true, \"loader\": \"ExLlamav2_HF\"}",\
+    "--push-password", "optional_push_password_here",\
+    "--cookie-file", "cookie.txt",\
+    "--lora-path", "/uploads",\
+    "--sd-timeout", "600"]

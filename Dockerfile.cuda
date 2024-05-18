@@ -1,0 +1,42 @@
+FROM nvidia/cuda:12.1.0-base-ubuntu22.04
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=UTF-8
+RUN rm -f /etc/apt/apt.conf.d/docker-clean && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+RUN --mount=type=cache,target=/var/cache/apt --mount=type=cache,target=/var/lib/apt apt update &&\
+    apt install -y \
+    wget \
+    git \
+    pkg-config \
+    libcairo2-dev \
+    python3 \
+    python3-pip \
+    python-is-python3 \
+    ffmpeg \
+    libnvrtc11.2 \
+    libtcmalloc-minimal4 \
+    libmimalloc2.0 \
+    gifsicle \
+    libimage-exiftool-perl
+RUN useradd -m -u 10000 sd
+RUN --mount=type=cache,target=/root/.cache python -m pip install --upgrade pip wheel
+WORKDIR /sdtemp
+RUN --mount=target=/sdtemp,source=cache/sdtemp,rw git pull
+
+#torch and torchvision version number refer to
+#https://github.com/AUTOMATIC1111/stable-diffusion-webui/blob/master/launch.py
+ENV TORCH_COMMAND="pip install torch==2.2.0+cu121 torchvision xformers --extra-index-url https://download.pytorch.org/whl/cu121"
+RUN --mount=type=cache,target=/root/.cache python -m $TORCH_COMMAND
+RUN --mount=type=cache,target=/root/.cache --mount=target=/sdtemp,source=cache/sdtemp,rw python launch.py --skip-torch-cuda-test --exit
+COPY requirements_versions.txt /reqs1.txt
+RUN --mount=type=cache,target=/root/.cache python -m pip install -r /reqs1.txt
+RUN ln -s /usr/lib/x86_64-linux-gnu/libnvrtc.so.11.2 /usr/lib/x86_64-linux-gnu/libnvrtc.so && ln -s /usr/local/lib/python3.10/dist-packages/nvidia/cublas/lib/libcublas.so.12 /usr/local/lib/python3.10/dist-packages/nvidia/cublas/lib/libcublasLt.so.12 /usr/lib/x86_64-linux-gnu
+USER 10000
+#RUN mkdir /home/sd/.local
+# download the appropriate xformers version from https://anaconda.org/xformers/xformers
+#RUN pip install xformers --extra-index-url https://download.pytorch.org/whl/cu121
+#COPY xformers-0.0.25-py310_cu12.1.0_pyt2.2.1.tar.bz2 /home/sd/.local/
+#RUN tar -C /home/sd/.local -xf /home/sd/.local/xformers-0.0.25-py310_cu12.1.0_pyt2.2.1.tar.bz2
+#RUN rm /home/sd/.local/xformers-0.0.25-py310_cu12.1.0_pyt2.2.1.tar.bz2
+
+WORKDIR /stablediff-web

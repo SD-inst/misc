@@ -1,0 +1,3 @@
+[submodule "cache/sdtemp"]
+	path = cache/sdtemp
+	url = https://github.com/rkfg/stable-diffusion-webui.git

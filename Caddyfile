@@ -1,0 +1,88 @@
+{
+	auto_https disable_certs
+	servers :7860 {
+		listener_wrappers {
+			http_redirect
+			tls
+		}
+	}
+}
+
+(rp) {
+	reverse_proxy {args[0]} {
+		@rperr status 500 501 502 503
+		handle_response @rperr {
+			root * /srv
+			rewrite * /502.html
+			file_server {
+				status 502
+			}
+		}
+	}
+}
+
+(sd) {
+	encode zstd gzip
+	redir /q /q/
+	redir /tts /tts/
+	redir /grafana /grafana/
+	redir /speedtest /speedtest/
+	header Onion-Location http://tordomain.onion{path}
+	handle_errors {
+		@srverr `{err.status_code} >= 500`
+		handle @srverr {
+			root * /srv
+			rewrite * /502.html
+			file_server
+		}
+	}
+	handle_path /static/* {
+		root * /srv
+		file_server
+	}
+	handle /sdapi/* {
+		respond "Access denied" 403
+	}
+	handle /grafana/* {
+		import rp http://grafana:3000
+	}
+	handle_path /speedtest/* {
+		reverse_proxy http://speedtest:8989
+	}
+	handle {
+		request_body upload/files {
+			max_size 1GB
+		}
+		import rp http://authproxy:7860
+	}
+}
+
+(tls) {
+	tls /etc/caddy/ssl/example.com/fullchain.pem /etc/caddy/ssl/example.com/privkey.pem
+}
+
+# main site
+https://example.com:7860 {
+	import sd # maintenance
+	import tls
+	handle /metrics {
+		respond "Access denied" 403
+	}
+}
+
+# no SSL
+:7861 {
+	import sd
+}
+
+:7760 {
+	reverse_proxy http://stablediff-cuda:7860
+}
+
+:7761 {
+	encode zstd gzip
+	handle /v1/* {
+		reverse_proxy http://text-generation-webui:5000
+	}
+	reverse_proxy http://text-generation-webui:7860
+}
